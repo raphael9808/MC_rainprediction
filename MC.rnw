@@ -1,0 +1,1189 @@
+\documentclass[9pt]{article}
+\usepackage[frenchb]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[top=2cm, bottom=2cm, left=4cm, right=4cm]{geometry}
+\usepackage{amsthm}
+\usepackage{amsmath}
+\usepackage{dsfont}
+\usepackage{enumitem}
+\usepackage{amssymb}
+\usepackage{mathrsfs}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+
+\fancyfoot[C]{- \textbf{\thepage} -} 
+\fancyhead[L]{Projet Monte-Carlo}
+
+\title{\underline{Méthodes de Monte-Carlo}}
+\author{\small{CWILING Ariane \qquad MAILLET Raphaël \qquad PICAS Marie-Julie}}
+
+\date{8 Janvier 2020}
+
+% Début du document % 
+
+\begin{document}
+
+\newtheorem{lemma}{\underline{\textsc{Lemme}}}
+\renewcommand{\proofname}{\underline{\textsc{Preuve}}} 
+
+\maketitle
+
+\underline{Exercice 1}.  ~\\
+\hspace*{0.33\textwidth} \hrulefill \hspace*{0.33\textwidth} ~\\
+\begin{center}
+  \textbf{Partie I} - Simulation de variables aléatoires ~\\ ~\\
+\end{center}
+
+1. ~\\
+\indent (a) Afin de simuler un échantillon distribué suivant la densité $f$, nous allons utiliser la méthode de la fonction inverse. Le calcul de la fonction de répartition nous donne que cette dernière est de la forme ~\\
+
+  \begin{center}  
+$F(x) = \exp(-\exp(-\frac{x-\mu}{\beta})) + \gamma$, \quad avec $\gamma \in \mathbb{R}$. 
+  \end{center}
+  
+\indent Or, on sait que F tend vers 1 lorsque $x$ tend vers l'infini, ce qui impose alors  $\gamma = 0$.\\ ~\\
+\indent Dès lors, la fonction F est inversible d'inverse $ F^{-1} : y \mapsto \mu - \beta\log(-\log(y))$. D'après la méthode de la fonction inverse, on sait que si $U \hookrightarrow \mathbb{U}([0;1])$, alors $F^{-1}(U) \sim F$. ~\\
+
+<<echo = F>>=
+
+library(codetools)
+library(microbenchmark)
+library(viridisLite)
+library(reliaR)
+library(plot3D)
+library(knitr)
+c.pal <- viridis(2)
+@ 
+
+
+<<>>=
+# ----- Déclaration des variables -----
+
+n <- 1000 #on prend ici n = 1000 afin d'avoir des 
+          #représentations graphiques intéressantes
+mu <- 1
+beta <- 2
+
+# ----- Simulation par la méthode de la fonction inverse ~ gumbel -----
+
+F_inv <- function(n, x, mu, beta){
+  return(mu - beta * log(-log(x)))
+}
+
+simu_gumbel <- function(n, mu, beta) {
+  return(F_inv(n, runif(n), mu, beta))
+}
+
+x <- simu_gumbel(n, mu, beta) #échantillon de taille n 
+
+@
+
+(b) Pour vérifier notre simulation, nous allons mettre en place deux tests : ~\\
+
+\indent $\multimap$ Le premier test consiste en la \textbf{superposition de l'histogramme} (\textit{réalisé avec n = 1000}) de nos simulations avec le tracé de la \textbf{densité d'une loi de Gumbel}.
+~\\
+<< fig.height=5>>=
+
+# ----- Histogramme et densité observée + théorique -----
+
+hist(x,
+  proba = T, breaks = "FD", col = "grey60",
+  border = "grey70", main = "Simulation loi de Gumbel"
+) #on trace l'histogramme de nos observations
+
+curve(dgumbel(x, mu, beta),
+  from = -5, to = 15, add = T,
+  col = c.pal[2]
+) #on trace la densité théorique 
+
+lines(density(x), col = c.pal[1]) #on trace la densité observée
+
+legend(7, 0.15,
+  legend = c("densité Gumbel", "densité estimée"),
+  col = c(c.pal[2], c.pal[1]), lty = 1, cex = 0.6
+  )
+@
+
+Ce test, bien que très visuel, ne permet pas vraiment de valider que notre échantillon est réellement réparti suivant une loi de gumbel de paramètre $\mu$ et $\beta$. ~\\
+
+\indent $\multimap$ Nous avons donc dû mettre en place un autre mode de vérification : une vérification \textbf{quantile-quantile} . Lors de ce test, on trace la répartition des quantiles théoriques en fonction des quantiles observés.  
+
+<<fig.height = 5>>=
+u <- rgumbel(n, mu, beta) # simulation théorique d'un échantillon 
+                          # gumbel de
+                          # paramètres mu et beta
+qqplot(x, u,
+  main = "graphique quantile-quantile",
+  xlab = "quantiles observés", ylab = "quantiles théoriques"
+)
+y <- -2:15
+lines(y,y, col = c.pal[2]) #Affichage de la droite y=x
+legend(7, 0.15,
+  legend = "droite y = x",
+  col = c.pal[2], lty = 1, cex = 0.6
+  )
+
+@
+
+On voit bien sur ce graphique apparaître une droite, cette droite confirme que l'échantillon simulé par la méthode du rejet est bien distribué suivant la loi Gumbel comme attendu. Cette méthode, même si elle paraît moins explicite, assure réellement que la répartition est exacte. ~\\
+
+\noindent 2. ~\\
+\indent (a) Afin de calculer la densité jointe, on détermine la fonction de répartition du couple $(X_{(1)}, X_{(n)})$. ~\\ ~\\
+\indent Soit $(x,y) \in \mathbb{R}^{2}$ avec $x \leq y$, ~\\ 
+	  \begin{equation}
+	  	\begin{aligned}[t]  
+\mathbb{P}(X_{(1)} \leq x, X_{(n)} \leq y) & =  \mathbb{P}( X_{(n)} \leq y )  -  \mathbb{P}( X_{(1)} > x , X_{(n)} \leq y ) \\ \nonumber 
+                                          & =  F(y)^{n} - (F(y) - F(x))^{n}. \nonumber \quad (\star)
+       \end{aligned}
+    \end{equation}
+Dès lors, il vient, en dérivant $(\star)$ par rapoort aux deux variables, que pour tout couple de réels $(x,y)$: ~\\ 
+
+  \begin{equation}
+	  	\begin{aligned}[t] 
+f_{1,n}(x,y)  & =  \frac{\partial}{\partial x \partial y}(\mathbb{P}(X_{(1)} \leq x, X_{(n)} \leq y)) \\ \nonumber
+              & = n(n-1)(F(y) - F(x))^{n-2}f(x)f(y)\mathds{1}_{x \leq y}. \nonumber
+       \end{aligned}
+    \end{equation} ~\\
+    \newpage
+\indent (b) Pour simuler des couples de variables aléatoires $(X_{(1)}, X_{(n)})$, nous avons pensé à deux méthodes différentes : ~\\ 
+
+    \indent $\multimap$ La première de nos idées est de simuler $n$ variables aléatoires distribuées suivant une loi de Gumbel de paramètres $\mu$ et $\beta$, et d'en prendre le minimum et le maximum. Cette méthode paraît à première vue naïve et intuitive, en effet, afin de récupérer un couple de variables aléatoires, il nous faut en simuler 100, ce qui n'est pas du tout optimal. Nous avons donc pensé à peut-être réutiliser les variables aléatoires inutilisées pour les tirages suivants, mais cela engendrerait une perte non négligeable d'aléas lors des tirages suivants.  ~\\  
+    
+<<>>=
+n <- 100
+m <- 1000 #nombre de couples de variables aléatoires en sortie
+
+# ----- Simulation par la méthode naïve -----
+
+simul_f <- function(m){
+  y <- c()
+  for(i in 1:m){
+    x <- rgumbel(m, mu, beta)
+    y <- c(y, min(x), max(x))
+  }
+  return(matrix(y, nrow = 2))
+} #Cette fonction retourne une matrice contenant les simulations
+
+@
+    
+Cette méthode de simulation cause beaucoup de pertes, mais fonctionne bien et rapidement. ~\\
+
+  \indent $\multimap$ La deuxième idée consiste à (répondre à la question) utiliser la densité que nous venons de déterminer afin de simuler des échantillons. Pour ce faire, nous allons mettre en place un algorithme du rejet. ~\\ 
+
+<<>>=
+
+n <- 100 
+m <- 1000
+
+# ----- Densité théorique du couple (X(1),X(n)) -----
+
+f.1n <- function(x, y) {
+  z <- n * (n - 1) * (pgumbel(y, mu, beta)
+  - pgumbel(x, mu, beta))^(n - 2)
+  return(z * dgumbel(x, mu, beta) * dgumbel(y, mu, beta) * (y > x))
+}
+
+# ----- Simulation par la méthode de rejet de (X,Y) ~ f.1n -----
+
+# On utilise la méthode de la fonction inverse en simulant un couple
+# de gumbel indépendantes
+
+simul_f1n <- function(m) {
+  simu <- c()
+  for (i in 1:m) {
+    x <- rgumbel(2, mu, beta)
+    u <- runif(1, 0, 1)
+    while (u > (pgumbel(x[1], mu, beta) 
+                - pgumbel(x[2], mu, beta))^(n - 2) 
+                * (x[2] - x[1] > 0)) {
+      x <- rgumbel(2, mu, beta)
+      u <- runif(1, 0, 1)
+    }
+    simu <- c(simu, x)
+  }
+  return(matrix(simu, nrow = 2))
+}
+@
+
+Cette méthode de simulation fonctionne mais est très loin d'être optimale. En effet, lors de la mise en place d'un algorithme du rejet, le temps d'attente avant qu'une variable soit acceptée \textit{(noté T)} est distribué suivant une loi géométrique d'espérance $n(n-1)$. Soit donc dans notre exemple, en moyenne, une variable acceptée tous les 10000 essais. 
+
+\indent Ainsi, il est clair que cette méthode ne peut être considérée comme satisfaisante, nous allons donc mettre en place une nouvelle méthode de rejet, plus performante : ~\\
+
+\noindent Notons $\forall  (x,y) \in \mathbb{R}^2$, $ g(x,y) = (n-1)F(y)^{n-2}f(y)f(x).$ \\
+On a alors : \\
+ \begin{equation}
+	 \begin{aligned}[t]
+		f_{1n}(x,y) & = n(n-1){(F(y)-F(x))}^{n-2}f(x)f(y)\mathds{1}_{x \leq y} \\ \nonumber
+				& \leq n(n-1){F(y)}^{n-2}f(x)f(y) \\ \nonumber
+				& \leq ng(x,y) \nonumber
+	\end{aligned}
+\end{equation}	\\
+On va ensuite mettre en place une nouvelle méthode de rejet, en s'appuyant sur l'observation suivante : \\
+ \begin{equation}
+	 \begin{aligned}[t]
+		\int_{\mathbb{R}^2}g(x,y) \: \text{dxdy} &= \int_{\mathbb{R}}\int_{\mathbb{R}} (n-1)F(y)^{n-2}f(y)f(x) \: \text{dxdy}  \\ \nonumber
+									   & = \int_{\mathbb{R}}(n-1)F(y)^{n-2}f(y) \: \text{dy} \underbrace{\int_{\mathbb{R}} f(x) \: \text{dx}}_{=1} \\ \nonumber
+									   & =  \int_{\mathbb{R}}(n-1)F(y)^{n-2}f(y) \: \text{dy} \\ \nonumber
+									   & = \left[{{F(y)}^{n-1}}\right]_{-\infty}^{+\infty} \\ \nonumber
+									   & = 1
+	\end{aligned}
+\end{equation}
+
+<<>>=
+n <- 100
+m <- 1000
+
+# ----- Mise en place d'une autre méthode de rejet-----
+
+simul_f1n_2 <- function(m) {
+  simu <- c() 
+  x <- c()
+  for (i in 1:m) {
+    x[1] <- rgumbel(1, mu, beta)
+    x[2] <- F_inv(1, runif(1)^(1 / (n - 1)), mu, beta)
+    u <- runif(1, 0, 1)
+    while (u > ((pgumbel(x[2], mu, beta) - pgumbel(x[1], mu, beta))
+                / (pgumbel(x[2], mu, beta)))^(n - 2) 
+                * (x[2] - x[1] > 0)) {
+      x[1] <- rgumbel(1, mu, beta)
+      x[2] <- F_inv(1, runif(1)^(1 / (n - 1)), mu, beta)
+      u <- runif(1, 0, 1)
+    }
+    simu <- c(simu, x)
+  }
+  return(matrix(simu, nrow = 2))
+}
+
+@
+
+En considérant la remarque précédente, on remarque bien que cette méthode est en théorie plus efficace que la précédente, en effet, ici $\mathbb{E}(T) = n < n(n-1)$. 
+Voici un tableau récpitulatif de l'efficacité des trois algorithmes de simulation mis en place précédemment : ~\\
+
+<< cache = TRUE >>=
+
+n <- 100
+m <- 10
+
+# ----- Test d'efficacité -----
+
+test1 <- microbenchmark(simul_f(m), simul_f1n(m), simul_f1n_2(m))
+print(test1, unit = "ms", signif = 2)
+
+@
+
+Sur ce tableau, on voit très bien que la première méthode de rejet est la moins efficace, la seconde fonctionne beaucoup mieux, mais est toujours plus lente que la méthode naïve. Ces résultats ne sont pas étonnants au vu des différents commentaires faits après l'implémentation de chacune de nos 3 fonctions. ~\\
+
+Afin de vérifier nos méthodes de simulations, nous allons maintenant mettre en place des vérifications graphiques en 3D, qui bien que seulement visuelles, permettront de vérifier la validité de nos échantillons \textit{(on ne vérifie que notre deuxième algorithme du rejet)}. 
+~\\
+
+<<fig.height=4, fig.show = 'hold', cache = TRUE>>=
+
+n <- 100
+m <- 10000
+par(mfrow=c(1,2), las=1)
+
+# ----- Densité théorique 3D ----
+
+f.3D <- function(c, xlim, ylim, sub = 0.02) {
+  x <- seq(xlim[1], xlim[2], sub)
+  y <- seq(ylim[1], ylim[2], sub)
+  return(list(
+    x = x,
+    y = y,
+    z = c * outer(x, y, f.1n)
+  ))
+}
+
+f.t <- f.3D(1, c(-4, -1), c(5, 17))
+
+persp3D(f.t$x, f.t$y, f.t$z,
+  phi = 20, theta = 35, ticktype = "detailed",
+  bty = "b2", cex.axis = 0.4,
+  xlab = "min", ylab = "max", zlab = "",
+  facets = F, colkey = F
+)
+image2D(f.t$z, f.t$x, f.t$y, xlab = "min", ylab = "max")
+@
+\begin{center}
+  \textbf{Distribution théorique de $(X_{(1)}, X_{(n)})$}
+\end{center}
+<<fig.height=4, fig.show = 'hold', cache = TRUE>>=
+
+par(mfrow=c(1,2), las=1)
+
+# ----- Histogramme 3D ----
+
+emp.dist <- function(simu, n.cut){
+  x_c <- cut(simu[1,], n.cut[1])
+  y_c <- cut(simu[2,], n.cut[2])
+  z_d <- table(x_c, y_c)
+  x <- seq(min(simu[1,]), max(simu[1,]), length.out = n.cut[1])
+  y <- seq(min(simu[2,]), max(simu[2,]), length.out = n.cut[2])
+  return(list(
+        x = x,
+        y = y,
+        z = z_d * prod(n.cut)/(ncol(simu)*93)
+  ))
+}
+
+simu <- simul_f1n_2(m)
+
+f.e <- emp.dist(simu, c(40,40))
+
+hist3D(f.e$x, f.e$y, f.e$z,
+  phi = 20, theta = 35,
+  ticktype = "detailed",
+  bty = "b2", cex.axis = 0.4,
+  xlab = "min", ylab = "max", zlab = "",
+  facets = F, colkey = F
+)
+image2D(f.e$z, f.e$x, f.e$y, xlab = "min", ylab = "max", 
+        xlim = c(-4,-1), ylim = c(5.5,17))
+
+@
+\begin{center}
+  \textbf{Distribution empirique de $(X_{(1)}, X_{(n)})$}
+\end{center} ~\\
+
+\hspace*{0.33\textwidth} \hrulefill \hspace*{0.33\textwidth} ~\\ 
+~\\
+
+\begin{center}
+  \textbf{Partie II} - Estimation de l'étendue par la méthode de Monte-Carlo classique. ~\\ ~\\
+\end{center}
+
+\noindent 1. Dans la suite, on va chercher à estimer $\delta = \mathbb{E}(\Delta)$ , avec $\Delta = X_{(n)} - X_{(1)}$. ~\\
+Cette estimation sera toujours réalisée en plusieurs étapes : ~\\
+  \begin{enumerate}
+    \item On simule $m$ vecteurs de taille $n$ : $Y_1,\: ...\: ,Y_m$.~\\
+    \item On transforme ces vecteurs afin de les adapter à la méthode d'estimation mise en place \textit{(MC classique, variable antithétique, variable de contrôle ...)}. ~\\ 
+    \item On calcule une estimation de $\delta$. 
+  \end{enumerate} ~\\
+  
+Pour la suite du projet, on va définir ici deux fonctions qui nous seront nécessaires, pour la réalisation et l'étude de nos estimations: les fonctions \textit{\textbf{MC.estim}} et \textit{\textbf{MC.estim.evol}}. 
+
+<<>>=
+MC.estim <- function(y, level = 0.95) {
+  hn <- mean(y)
+  q <- qnorm(0.5 * (1 + level))
+  n <- length(y)
+  s <- sd(y) * q / sqrt(n)
+  return(list(
+    delta = hn,
+    b.inf = hn - s,
+    b.sup = hn + s,
+    level = level,
+    variance = s
+  ))
+}
+
+MC.estim.evol <- function(y, level = 0.95) {
+  n <- length(y)
+  hn <- cumsum(y) / (1:n)
+  q <- qnorm(0.5 * (1 + level))
+  s <- sd(y) * q / sqrt(n)
+  var <- (cumsum(y^2) - (1:n) * hn^2) / (0:(n - 1))
+  s2 <- q * sqrt(var / (1:n))
+  return(list(
+    delta = hn,
+    b.inf = hn - s2,
+    b.sup = hn + s2,
+    level = level,
+    variance = var
+  ))
+}
+
+@
+\indent (a) Dans un premier temps, nous allons réaliser cette estimation en utilisant la densité $f$ de la loi Gumbel.~\\
+
+\indent Ainsi, en notant : ~\\
+
+\noindent $h : x \in \mathbb{R}^n \mapsto max(x) - min(x)$, on va estimer $\delta$ par ~\\
+  \begin{equation}
+    \widehat{\delta_n}^{f} = \frac{1}{n}\sum_{k=1}^n h(Z_k), \quad \text{où}\quad (Z_k)_k \stackrel{\text{i.i.d}}{\hookrightarrow} Gumbel(\mu, \beta) \nonumber
+  \end{equation}
+
+<<>>==
+n <- 100
+m <- 10000 # paramètre à définir
+
+h <- function(x) {
+  return(max(x) - min(x))
+}
+
+# ----- Création de l'échantillon ----
+
+z1 <- matrix(rgumbel(n * m, mu, beta), nrow = n)
+
+echantillon_f <- function(z, m) {
+  y <- numeric(m)
+  for (i in 1:m) {
+    y[i] <- h(z[, i])
+  }
+  return(y)
+}
+
+# ----- Estimation par la méthode de MC classique -----
+
+MC.estim(y <- echantillon_f(z1, m))
+
+@
+
+Cette méthode semble donner une estimation intéressante de la valeur que l'on cherche à calculer. ~\\
+
+\indent (b) Regardons maintenant une méthode d'estimation similaire fondée sur la simulation par la méthode du rejet :  \\
+  \begin{equation}
+     \widehat{\delta_n}^{f_{1n}} = \frac{1}{n}\sum_{k=1}^n h(\tilde{Z_k}), \quad \text{où}\quad (\tilde{Z_k})_k \stackrel{\text{i.i.d}}{\textasciitilde} f_{1n} \nonumber
+  \end{equation}
+~\\
+<<cache = TRUE>>=
+
+n <- 100
+m <- 10000
+
+# ---- Création de l'échantillon ----
+
+z2 <- simul_f1n_2(m)
+
+echantillon_f1n <- function(z, m) {
+  y <- numeric(m)
+  for (i in 1:m) {
+    y[i] <- z[2,i] - z[1,i]
+  }
+  return(y)
+}
+
+# ----- Estimation -----
+
+MC.estim(echantillon_f1n(z2, m))
+
+@
+\indent Cette méthode d'estimation présente à première vue des résultats assez similaires à la première. On a déjà vu à la question $1)$, que la simulation par la méthode de rejet est plus couteuse que la première. ~\\
+
+Nous allons maintenant comparer les méthodes d'estimation : 
+~\\
+<<cache = TRUE>>=
+n <- 100
+m <- 10000 
+
+# ----- Test et comparaison -----
+
+test2 <- microbenchmark(echantillon_f(z1, m), echantillon_f1n(z2, m))
+
+print(test2, unit = "ms", signif = 2)
+
+@
+~\\
+\indent On voit bien ici que la deuxième méthode d'estimation est plus rapide, en effet, une fois l'échantillon donné, celle-ci se démarque de la première par l'abscence totale d'évaluation par la fonction $h$ définie plus haut. C'est cette recherche du min et du max qui rend la première méthode plus lente. ~\\
+\indent Néanmoins, le test que nous venons d'effectuer est réalisé une fois l'échantillon simulé. Afin de se rendre réellement compte de quelle méthode est la plus efficace, on va mettre en place un test comparant tout le processus d'estimation. ~\\
+
+<<cache = TRUE>>=
+n <- 100
+m <- 100
+
+# ----- Création des fonctions  -----
+
+estim_tot_f <- function(m) {
+  z1 <- matrix(rgumbel(n * m, mu, beta), nrow = n)
+  MC.estim(echantillon_f(z1, m))
+}
+
+estim_tot_f1n <- function(m) {
+  z2 <- simul_f1n_2(m)
+  MC.estim(echantillon_f1n(z2, m))
+}
+
+# ----- Réalisation du test de comparaison -----
+
+test3 <- microbenchmark(estim_tot_f(m), estim_tot_f1n(m))
+print(test3, unit = "ms", signif = 2)
+
+@
+\newpage
+Cette observation confirme ce que nous observions depuis le début de ce projet, la simulation par la première méthode est plus efficace que celle où l'on implémente une méthode de rejet. En effet, le coût d'évaluation de la fonction $h$ ne suffit pas à compenser le temps d'attente pour la simulation d'un couple réparti selon $f_{1n}$. Il ne faut pas oublier néanmoins que même si cette méthode est plus rapide, elle engendre de nombreuses pertes : parmi les variables aléatoires simulées, un grand nombre d'entre elles sera inutilisable. \\
+
+\noindent 2) ~\\
+\indent (a) Dans cette question, nous allons utiliser la méthode de la variable de contrôle. Cette méthode propose l'utilisation d'un estimateur de la forme suivante : 
+  \begin{equation}
+    \widehat\delta_n(b) = \frac{1}{n}\sum_{k=1}^n h(X_k) - \langle \begin{pmatrix}b_1 \\ b_2\end{pmatrix} ; H(X_k) - \mathbb{E}(H(X_k))\rangle \quad, \text{où} \quad H: x \mapsto \begin{pmatrix} h_1(x)\\ h_2(x)\end{pmatrix} \nonumber
+  \end{equation}
+Ceci offre donc de la liberté dans le choix de $H$ et de $b$. \\
+
+$\multimap$ \underline{Choix de $H$} ~\\
+
+  \begin{lemma}
+    On se place dans la cadre d'une estimation paramétrique. \\
+    Si $X \hookrightarrow f_{\theta}$, alors 
+    
+	  \begin{equation}
+	  	\mathbb{E}_{\theta}(\nabla_{\theta}\text{log}L(X; \mu,\beta)) = 0.  \nonumber
+	  \end{equation} ~\\
+  \end{lemma}
+  \begin{proof}
+	  \begin{equation}
+	  	\begin{aligned}[t]
+		  	\mathbb{E}_{\theta}(\nabla_{\theta}\text{log}L(X; \theta)) & = \int\nabla_{\theta}\text{log}L(X; \theta) \: \text{d}f_\theta\nonumber \\
+														   & = \int \frac{\nabla_\theta L(x;\theta)}{L(x;\theta)}\:f_{\theta}\:\text{dx} \\ \nonumber
+														   & = \int \nabla_\theta L(x;\theta)\:\text{dx} \\ \nonumber
+														   & = \nabla_\theta \int L(x;\theta)\:\text{dx} \\ \nonumber
+														   & = \nabla_\theta \underbrace{\int \text{d}f_\theta}_{=1} \\ \nonumber
+														   & = 0. 
+		  \end{aligned}
+	  \end{equation}
+  \end{proof}
+Ce lemme nous incite à choisir pour $H$, la fontion score. En effet, étant d'espérance nulle (donc connue), elle apparait comme un premier candidat à la mise en place de la méthode de la variable de contrôle. ~\\
+
+$\multimap$ \underline{Choix de b} ~\\
+  
+On sait que pour l'implémentation de cette méthode, il existe un $b$ optimal, noté $b^*$ : 
+  \begin{equation}
+    b^* = {\Sigma_Z}^{-1} \: \Sigma_{(h(X),Z)} \quad \text{,où} \quad Z = (h_1(X), h_2(X)). \nonumber
+  \end{equation}
+Néanmoins, le problème principal est que cette valeur n'est pas accessible. Nous allons donc mettre en place une stratégie de \textit{burn-in period}, afin d'estimer $b^*$, en utilisant les $l$ premières observations : 
+  \begin{equation}
+    \widehat{b_l^*}^i = \frac{\sum_{k=1}^lh_i(X_k)(h_i(X_k) - \bar{h_l})}{\sum_{k=1}^lh_i(X_k)^2} \nonumber
+  \end{equation}
+
+<<cache = TRUE>>=
+
+n <- 100
+m <- 10000
+
+# ----- Définition de la fonction score -----
+
+score <- function(x, mu, beta) {
+  return(c(
+    (-n / beta)
+    - sum((x - mu) / (beta * beta) * exp(-(x - mu) / beta))
+      + sum((x - mu) / (beta * beta)),
+    (-1 / beta) * sum(exp(-(x - mu) / beta))
+      + n / beta
+  ))
+}
+
+# ---- Création de l'échantillon -----
+
+z <- matrix(rgumbel(n * m, mu, beta), nrow = n)
+
+# ----- Création d'un échantillon avec b donné -----
+
+echantillon_controle <- function(z, m, b1, b2, mu, beta) {
+  y <- numeric(m)
+  for (i in 1:m) {
+    y[i] <- h(z[, i]) - b1 * score(z[, i], mu, beta)[1] 
+    - b2 * score(z[, i], mu, beta)[2]
+  }
+  return(y)
+}
+
+# ----- Estimation du beta optimal + Simulation : 
+#            méthode de burn-in period           -----
+
+burn_in_period <- function(z, l, mu, beta) {
+  hl <- 0
+  for (i in 1:l) {
+    hl <- hl + h(z[, i])
+  }
+  hl <- hl / l
+  s1 <- c(0, 0)
+  s2 <- c(0, 0)
+  for (i in 1:l) {
+    Hz <- score(z[,i], mu, beta)
+    s1[1] <- s1[1] + Hz[1] * (h(z[,i]) - hl)
+    s1[2] <- s1[2] + Hz[1]^2
+    s2[1] <- s2[1] + Hz[2] * (h(z[,i]) - hl)
+    s2[2] <- s2[2] + Hz[2]^2
+  }
+  return(list(
+    b1 = s1[1] / s1[2],
+    b2 = s2[1] / s2[2]
+  ))
+}
+
+echantillon_controle_opt <- function(z, m, l, mu, beta) {
+  y <- numeric(m - l)
+  b <- burn_in_period(z, l, mu, beta)
+  for (i in ((l + 1):m)) {
+    y[i - l] <- h(z[, i]) - b$b1 * score(z[, i], mu, beta)[1] 
+    - b$b2 * score(z[, i], mu, beta)[2]
+  }
+  return(y)
+}
+@
+
+On va maintenant chercher le $l$ à utiliser dans la méthode de \textit{burn-in period} pour avoir la plus petite variance. Pour cela nous allons comparer la variance de notre estimateur pour $l$ variant entre 1 et 100. On considère en effet qu'on ne va pas utiliser plus de 100 valeurs pour estimer $b^{\ast}$.  ~\\
+
+<<cache = TRUE>>=
+
+n <- 100
+m <- 10000
+z <- matrix(rgumbel(n * m, mu, beta), nrow = n)
+
+# ----- Recherche du l optimal -----
+
+l_opt <- function(z, m, mu, beta) {
+  v <- 10
+  for (i in 1:100) {
+    d <- echantillon_controle_opt(z, m, i, mu, beta)
+    if (MC.estim(d)$variance < v) {
+      v <- MC.estim(d)$variance
+      l <- i
+    }
+  }
+  return(l)
+}
+
+l <- l_opt(z, m, mu, beta)
+print(l)
+
+MC.estim(echantillon_controle_opt(z, m, l, mu, beta))
+
+
+
+@
+~\\
+
+\hspace*{0.33\textwidth} \hrulefill \hspace*{0.33\textwidth} ~\\ 
+~\\
+
+\begin{center}
+  \textbf{Partie III} - Estimation d'un évènement rare ~\\ ~\\
+\end{center}
+
+1. On va réaliser ici une estimation par la méthode de Monte Carlo classique, mais en utilisant deux manières de simuler différentes, afin de les comparer et de choisir celle qui fonctionne le mieux : ~\\ 
+
+  $\multimap$ \underline{Simulation en utilisant la densité d'une loi exponentielle} : ~\\
+  
+    \noindent Comme dans la partie II, cette méthode consiste à simuler $n$ réalisations de $X \hookrightarrow \mathcal{E}(2)$ et à en prendre le max afin de récupérer une réalisation de $V_{(n)}$.
+<<cache = TRUE>>=
+
+n <- 1000
+m <- 10000
+t <- 8
+
+# ----- Définition de la fonction h -----
+
+h_t <- function(t, x) {
+  return((x > t))
+}
+
+# ----- Simulation -----
+
+z <- matrix(rexp(n * m, 2), nrow = n)
+
+# ----- Estimation -----
+
+echantillon_Fn <- function(z,m) {
+  y <- c()
+  for (i in 1:m) {
+    y[i] <- max(z[, i])
+  }
+  return(y)
+}
+
+y <- h_t(t, echantillon_Fn(z, m))
+
+MC.estim(y)
+@
+
+
+~\\
+
+  $\multimap$ \underline{Simulation par la méthode de la fonction inverse} : ~\\
+  
+\noindent Calculons la  fonction de répartition $\tilde{F_n}$de $V_{(n)}$ : ~\\
+\noindent On sait que $V_{(n)}(\Omega) = \mathbb{R}_{+}$. Soit donc $x \geq 0$, ~\\
+	 \begin{equation}
+		 \begin{aligned}[t]
+		 	   \mathbb{P}(V_{(n)} \leq x) & = \mathbb{P}\left({\bigcap_{i=1}^{n}{V_i \leq x }}\right)\\ \nonumber
+        			   				      & = \prod_{i=1}^n \mathbb{P}\left({V_i \leq x }\right) \qquad \textit{\small{, par ind\'ependance.}}\\ \nonumber
+							      & = \left({1 - e^{-2x}}\right)^{n} .\\ \nonumber
+        		\end{aligned}
+	\end{equation} ~\\
+Ainsi, la fonction de répartition de $V_{(n)}$ est $\tilde{F_n} : x \mapsto \left({1 - e^{-2x}}\right)^{n}$ qui est inversible d'inverse $\tilde{F_n}^{-1} : y \mapsto -\frac{1}{2}\text{log}(1 - y^{\frac{1}{n}})$.
+
+<<cache = TRUE>>=
+
+n <- 1000
+m <- 10000
+t <- 8
+
+# ----- Simulation ----- 
+
+z <- runif(m)
+echantillon_Fn_tilde <- function(z, m) {
+  return(-(1 / 2) * log(1 - z^(1 / n)))
+}
+
+# ----- Estimation -----
+
+MC.estim(h_t(t, echantillon_Fn_tilde(z, m)))
+
+@
+
+Les deux estimateurs que nous avons produits ne sont pas très satisfaisants, en effet, la valeur estimée est dans chacun des deux cas, tellement proche de 0, qu'aucune information ne peut réellement en être tirée. Ceci est une conséquence directe du fait que la loi exponentielle charge beaucoup plus les valeurs proches de 0 que les valeurs éloignées. ~\\
+Dès lors, il n'est pas réellement intéressant de comparer ces deux méthodes, car ces dernières ne sont pas exploitables. Pour avoir des résultats utilisables, il va falloir mettre en place une stratégie de type variable \textit{importance sampling} afin d'affiner les résultats.
+~\\
+
+\noindent 2. \\
+\indent (a) On va dans un premier temps tracer l'évolution en fonction de $n$ de la fonction de répartition de $V_{(n)} - 0.5 * \text{log}(n)$, afin d'avoir une idée de la convergence.
+
+<< fig.height = 4 >>=
+
+x <- seq(from = -1, to = 4, length = 1000)
+plot(x, (1 - exp(-2 * x - log(1)))^1 * (x > 0),
+  type = "l",
+  col = c.pal[2],
+  main = "Evolution de la fonction de répartition en fonction de n",
+  ylab = "répartition"
+)
+
+for (n in 2:50) {
+  lines(x, (1 - exp(-2 * x - log(n)))^n * (x + 0.5 * log(n) > 0),
+    type = "l", col = c.pal[2]
+  )
+} #On trace ici les fonctions de répartition lorsque n varie
+@
+
+Une première idée de la convergence se dessine alors, il semblerait que $V_{(n)} - 0.5 * \text{log}(n)$ converge en loi vers une Gumbel, il reste alors à vérifier cette hypothèse et à endéterminer les paramètres. ~\\
+
+Réalisons donc le calcul mathématiquement : \\
+
+\noindent Soit $n \in \mathbb{N}^{*}$, notons $Z_n := V_{(n)} - \frac{\text{log}(n)}{2}$. \\
+Alors $Z_n(\Omega) = \mathbb{R}$. ~\\
+Soit donc $x \geq 0$, ~\\
+ \begin{equation}
+	 \begin{aligned}[t]
+	 	   \mathbb{P}(Z_n \leq x) & = \mathbb{P}\left({V_{(n)} \leq x + \frac{\text{log}(n)}{2}}\right) \\ \nonumber
+		   				      & = \mathbb{P}\left({\bigcap_{i=1}^{n}{V_i \leq x + \frac{\text{log}(n)}{2}}}\right)\\ \nonumber
+        		   				      & = \prod_{i=1}^n \mathbb{P}\left({V_i \leq x + \frac{\text{log}(n)}{2}}\right) \qquad \textit{\small{, par ind\'ependance.}}\\ \nonumber
+						      & = \left({1 - e^{-(2x + \text{log}(n))}}\right)^{n} \\ \nonumber
+						      & = e^{n\text{log}\left(1 - e^{-(2x + \text{log}(n)}\right)} \\ \nonumber
+						      & = e^{n\left( -e^{-(2x + \text{log}(n))} + o\left( -e^{-(2x + \text{log}(n))}\right)\right)} \\ \nonumber
+						      & = e^{-e^{-2x}ne^{-\text{log}(n)}  + o\left( -ne^{-(2x + \text{log}(n))}\right) } \longrightarrow e^{-e^{-2x}}. 
+        \end{aligned}
+\end{equation}. ~\\
+
+Dès lors, il vient que $ x \in \mathbb{R}$,  $\mathbb{P}(Z_n \leq x) \longrightarrow F_{0,\frac{1}{2}}(x)$, ou $F_{0,\frac{1}{2}}$ est la fonction de répartition d'une loi de Gumbel de paramètres $\mu = 0 \text{ et } \beta = \frac{1}{2}$. \\
+En définitive , on a donc : 
+	\begin{equation}	
+		Z_n = V_{(n)} - \frac{\text{log}(n)}{2} \xrightarrow{\quad \mathcal{L} \quad} \mathcal{G}umbel(0, \frac{1}{2}) \nonumber
+	\end{equation} ~\\
+Ce résultat se vérifie maintenant simplement en rajoutant la fonction de répartition de Gumbel(0,$\frac{1}{2}$) au graphique précédent : 
+
+<< fig.height = 5, echo = F >>=
+
+x <- seq(from = -1, to = 4, length = 1000)
+plot(x, (1 - exp(-2 * x - log(1)))^1 * (x > 0),
+  type = "l",
+  col = c.pal[2],
+  main = "Evolution de la fonction de répartition en fonction de n",
+  ylab = "répartition"
+)
+for (n in 2:50) {
+  lines(x, (1 - exp(-2 * x - log(n)))^n * (x + 0.5 * log(n) > 0),
+    type = "l",
+    col = c.pal[2]
+  )
+}
+
+lines(x, pgumbel(x, 0, 1 / 2),
+  type = "l",
+  col = c.pal[1],
+  lwd = 2
+)
+
+legend(1, 0.4,
+  legend = "Répartition Gumbel (0,1/2)",
+  col = c.pal[1], lty = 1, cex = 0.6
+)
+
+@
+~\\
+\indent (b) La question précédente nous montre que la loi exponentielle appartient au domaine d'attraction Gumbel. C'est à dire que la répartition du maximum d'un échantillon aléatoire d'une loi exponentielle se comporte comme une loi de Gumbel.
+\noindent La remarque précédente nous pousse à utiliser une loi d'importance Gumbel lors de la mise en place de l'\textit{importance sampling}. 
+
+<< fig.height = 5, echo = FALSE>>=
+
+t <- 8
+n <- 1000
+
+# ----- Loi d'importance Z ~ Gumbel(8, 1/2) -----
+
+x <- seq(from = -1, to = 10, length = 1000)
+
+
+plot(x, n * 2 * exp(-2 * x) * (1 - exp(-2 * x))^(n - 1) * (x > 0),
+  type = "l",
+  col = c.pal[1],
+  ylab = "densité"
+)
+
+lines(x, dgumbel(x, 8, 0.5), type = "l", col = c.pal[2])
+
+legend(-1/2, 0.4,
+  legend = c("densité Vn", "densité Gumbel(8, 1/2)"),
+  col = c(c.pal[1], c.pal[2]), lty = 1, cex = 0.6
+)
+@
+
+Nous avons donc après avoir fait quelques tests choisi d'utiliser comme loi d'importance une $\mathcal{G}umbel(8,\frac{1}{2})$. ~\\
+\indent Le graphe ci-dessus nous montre bien que la loi d'importance convient parfaitement car le rapport des densités est borné sur $[8;\infty]$.Néanmmoins, nous avons réfléchi à des stratégies pour choisir de manière optimale la loi d'importance, mais celle-ci dépend de manière directe de la quantité que nous cherchons à estimer. Dès lors, nous avons simplement cherché à trouver les paramètres d'une Gumbel qui rendrait notre rapport de densités borné, et qui rédurait la variance lors de l'estimation par la méthode de l'échantillonage préférentiel.~\\
+\indent \textbf{Néanmoins, étant donné que le choix des paramètres, même s'il n'est pas fait de manière arbitraire, ne découle pas d'un raisonnement théorique, nous montrerons dans la suite que les résultats obtenus ne sont que très peu sensibles à de légères variations dans le choix des paramètres.} \textit{ça peut être intéressant je sais pas ce que vous en pensez sinon flemme ... } 
+
+<<cache = TRUE>>=
+
+t <- 8
+n <- 1000
+m <- 10000
+
+# ---- Création de l'échantillon ----
+
+z <- rgumbel(m, 8, 0.5)
+
+echantillon_pref <- function(z, mu, beta, n, t) {
+  z[z < 0] <- 0
+  f <- n * 2 * exp(-2 * z) * (1 - exp(-2 * z))^(n - 1)
+  g <- dgumbel(z, mu, beta)
+  h <- (z >= t)
+  y <- f * h / g
+  return(y)
+}
+
+y <- echantillon_pref(z, mu = 8, beta = 0.5, n, t)
+
+# ----- Estimation de la proba -----
+
+MC.estim(y)
+
+@
+~\\
+Les résultats obtenus grâce à cette méthode sont assez concluants, en effet, l'estimation de la probabilité recherchée a été significativement raffinée, et la variance diminuée. ~\\
+Traçons l'évolution de l'intervalle de confiance en fonction de $m$ : ~\\
+
+<<fig.height= 4, echo = FALSE>>=
+w <- MC.estim.evol(y)
+plot(1:length(w$delta), w$delta, type = "l", col = c.pal[1], ylim = c(0.00010, 0.00014), xlab = 'x' , ylab = 'proba')
+lines(1:length(w$delta), w$b.sup, type = "l", col = c.pal[2])
+lines(1:length(w$delta), w$b.inf, type = "l", col = c.pal[2])
+@
+
+(b) On va maintenant coder la méthode de la variable antithétique sur notre méthode d'échantillonage préférentiel, afin d'améliorer encore une fois la variance. 
+Cette méthode va se fonder sur l'observation suivante : \\
+
+\noindent On échantillonne les variables suivant les lois de Gumbel par la méthode de la fonction inverse. Etant donné que la loi du Gumbel ne présente aucune symétrie ou invariance, on va utiliser les symétries de la loi uniforme sur [0,1] qui est centrale lors de la mise en place de la fonction inverse.
+En effet, on remarque que si $U \hookrightarrow \mathbb{U}[0;1]$, alors $1-U \hookrightarrow \mathbb{U}[0;1]$.
+On va donc estimer $\delta$ grâce à l'estimateur $\widehat{\delta_n}^{\tiny{A}}$ qui utilise en plus de la méthode de l'échantillonage préférentiel, la méthode de la variable anthitétique.
+
+<<cache = TRUE>>=
+n <- 1000
+m <- 10000
+t <- 8
+
+# ----- Simulation -----
+
+z <- runif(m)
+
+
+# ----- Estimation -----
+
+echantillon_anthi <- function(z, mu, beta, n, t) {
+  x <- F_inv(n, z, 8, 0.5)
+  Ax <- F_inv(n, 1 - z, 8, 0.5)
+  y <- 1 / 2 * (echantillon_pref(x, mu, beta, n, t) +
+    echantillon_pref(Ax, mu, beta, n, t))
+}
+
+y <- echantillon_anthi(z, 8, 0.5, n, t)
+MC.estim(y)
+
+@
+
+On remarque que l'ajout de cette méthode permet la réduction de la variance. \\
+
+\textbf{Il y a des trucs plus compliqués à expliquer ici !!! }
+
+Ceci explique donc la perte de variance. ~\\
+
+\noindent \hspace*{0.33\textwidth} \hrulefill \hspace*{0.33\textwidth} ~\\
+\hspace*{0.33\textwidth} \hrulefill \hspace*{0.33\textwidth} ~\\
+
+
+
+\underline{Exercice 2}.  ~\\
+\begin{center}
+   - \textbf{Estimation de la probabilité d'avoir de faibles précipitations} - ~\\ ~\\
+\end{center} ~\\
+ Dans un premier temps, on définit les variables globales qui nous seront utiles dans tout le reste de l'exercice. 
+
+<<>>=
+lambda_pois <- 3.7
+k_weib <- 0.5
+lambda_weib <- 2
+level <- 0.95
+
+n <- 10000
+@
+~\\
+1. Dans cette première question, on cherche à réaliser une estimation de $p = \mathbb{P}(X\leq 3)$ par la méthode de Monte-Carlo classique. On a que $\mathbb{P}(X\leq 3) = \mathbb{E}(\mathds{1}_{X \leq 3})$. On va donc estimer $p$ par 
+  \begin{equation}
+    \widehat{p_n} = \frac{1}{n} \sum_{k = 1}^n \mathds{1}_{X_k<3} \quad, \text{où les } X_k \text{ sont i.i.d, de même loi que } X. \nonumber
+  \end{equation} ~\\
+Nous ne disposons pas de méthode classique afin de simuler des variables aléatoires de même loi que $X$, nous avons donc dû mettre en place une stratégie de simulation : 
+
+\begin{enumerate}
+  \item On simule une réalisation d'une loi de Poisson de $\lambda_p$, notée $s$.
+  \item On simule ensuite $s$ réalisations de lois de Weibull de paramètre $k$ et $\lambda_w$.
+  \item On somme ces $s$ réalisation pour obtenir la simulation d'une réalisation distribuée comme la variable aléatoire $X$.
+\end{enumerate} ~\\
+
+<<>>=
+
+# ----- Simulation -----
+
+echantillon_X <- function(n){
+  s <- rpois(n, lambda_pois)
+  x <- numeric(n)
+  for (i in 1:n) {
+    x[i] <- sum(rweibull(s[i], k_weib, lambda_weib))
+  }
+  return((x< 3))
+}
+
+# ----- Estimation -----
+y <- echantillon_X(n)
+
+MC.estim(y)
+@
+
+Traçons en plus l'évolution de l'intervalle de confiance : 
+
+<<fig.height= 4, echo = FALSE>>=
+w <- MC.estim.evol(y)
+plot(1:length(w$delta), w$delta, type = "l", col = c.pal[1], ylim = c(0.1, 0.4), xlab = "x", ylab = "proba")
+lines(1:length(w$delta), w$b.sup, type = "l", col = c.pal[2])
+lines(1:length(w$delta), w$b.inf, type = "l", col = c.pal[2])
+@
+~\\
+2) ~\\
+\indent (a) Nous allons maintenant mettre en place une méthode de Monte Carlo par stratification, et plus précisément une méthode de stratification par allocation proportionnelle. 
+
+<<>>=
+
+# Stratification : choisir des strates pour lesquelles la quantité d'interet varie peu au sein de chaque strate.
+# Or pour un nombre défini de précipitations, la quantité d'eau varie "moins"
+# On peut choisir S comme variable de stratification et comme strates les entiers tels que nk > 0.
+
+
+# Allocation proportionnelle : P(S = k) = nk/n
+# La loi de la poisson tend rapidement vers 0, donc les nk aussi.
+# On choisit les strates pour lesquelles nk > 0.
+
+strates_prop <- function(n) {
+  K <- 0
+  pk <- c(dpois(0:K, 3.7))
+  nk <- round(n * pk, 0)
+  while (nk[length(nk)] > 0) {
+    K <- K + 1
+    pk <- c(dpois(0:K, 3.7))
+    nk <- round(n * pk, 0)
+  }
+  return(list(
+    strate_max = K - 1,
+    pk = pk[1:K],
+    nk = nk[1:K]
+  ))
+}
+
+L <- strates_prop(n)
+K_prop <- L$strate_max
+pk_prop <- L$pk
+nk_prop <- L$nk
+
+
+# Comme on arrondit les nk il faut completer pour obtenir n observations.
+# On les ajoute/enleve sur la modalite la plus frequente.
+
+nk_prop[nk_prop == max(nk_prop)] <- nk_prop[nk_prop == max(nk_prop)] + (n - sum(nk_prop))
+
+# Pour obtenir l'estimation proportionnelle, sa variance et l'intervalle de confiance, on aura besoin de:
+# moyennes par strate (muk_prop)
+# variances par strates (sigmak_prop)
+# fréquence des strates (qk_prop)
+
+muk_prop <- numeric(K_prop + 1)
+sigmak_prop <- numeric(K_prop + 1)
+qk_prop <- nk_prop / n
+
+# Pour S=0, X vaut 0 donc l'indicatrice vaut 1, donc la moyenne de la strate vaut 1 et sa variance 0.
+
+muk_prop[1] <- 1
+sigmak_prop[1] <- 0
+
+# On calcule les moyennes et variances pour les autres strates (k>=1):
+
+for (k in 1:K_prop) {
+  X <- numeric(nk_prop[k + 1])
+  for (i in 1:nk_prop[k + 1]) {
+    X[i] <- sum(rweibull(k, k_weib, lambda_weib))
+  }
+  Y <- (X < 3)
+  muk_prop[k + 1] <- mean(Y)
+  if (nk_prop[k + 1] == 1) {
+    sigmak_prop[k + 1] <- 0
+  }
+  else {
+    sigmak_prop[k + 1] <- var(Y)
+  }
+}
+
+
+# Calcul de l'estimateur, de la variance de l'estimateur et de l'intervalle de confiance:
+
+estim_prop <- sum(pk_prop * muk_prop)
+
+var_estim_prop <- n * sum(pk_prop * pk_prop * sigmak_prop / nk_prop)
+
+q <- qnorm(0.5 * (1 + level))
+s <- q * sqrt(var_estim_prop) / sqrt(n)
+b.inf_prop <- estim_prop - s
+b.sup_prop <- estim_prop + s
+
+
+# RESULTATS #
+
+estim_strat_prop <- list(
+  p = estim_prop,
+  var = var_estim_prop,
+  b.inf = b.inf_prop,
+  b.sup = b.sup_prop,
+  level = level
+)
+
+
+
+# QUESTION 3 #
+
+# Allocation optimale : qk = pk*sigmak/sum(pi*sigmai)
+# ie nk = n*pk*sigmak/sum(pi*sigmai)
+
+# Il faut trouver le nombre de strates, de même en cherchant à partir de quel rang nk = 0 (on conserve le cas k = 0 même si nk = 0).
+# Il faut commencer par estimer sigmak car il est incalculable.
+# On utilise un estimateur convergent et un jeu de simulations independant de celui utilisé pour l'estimateur stratifié.
+
+strates_opt <- function(n) {
+  m <- 1000 # nb de simulations par strate, pour estimer chaque sigmak
+
+  K <- 1
+  sigmak_hat <- numeric(K + 1)
+  sigmak_hat[1] <- 0 # pour S = 0, X vaut 0 donc l'indicatrice vaut toujours 1, donc la  variance vaut 0
+
+  X <- numeric(m)
+  for (i in 1:m) {
+    X[i] <- sum(rweibull(1, k_weib, lambda_weib))
+  }
+  Y <- (X < 3)
+  sigmak_hat[2] <- sum(Y * Y) / (m - 1) - sum(Y) * sum(Y) / (m * (m - 1))
+
+  pk <- c(dpois(0:K, 3.7))
+
+  nk <- round(n * pk * sigmak_hat / sum(pk * sigmak_hat), 0)
+
+  while (nk[length(nk)] > 0) {
+    K <- K + 1
+    pk <- c(dpois(0:K, 3.7))
+    X <- numeric(m)
+    for (i in 1:m) {
+      X[i] <- sum(rweibull(K, k_weib, lambda_weib))
+    }
+    Y <- (X < 3)
+    sigmak_hat[K + 1] <- sum(Y * Y) / (m - 1) - sum(Y) * sum(Y) / (m * (m - 1))
+    nk <- round(n * pk * sigmak_hat / sum(pk * sigmak_hat), 0)
+  }
+  return(list(
+    strate_max = K - 1,
+    pk = pk[1:K],
+    nk = nk[1:K]
+  ))
+}
+
+
+
+L <- strates_opt(n) # strate maximum
+K_opt <- L$strate_max
+pk_opt <- L$pk
+nk_opt <- L$nk
+
+
+# Comme on arrondit les nk il faut compl?ter pour obtenir n observations.
+# On les ajoute/enleve sur la modalite la plus frequente.
+
+nk_opt[nk_opt == max(nk_opt)] <- nk_opt[nk_opt == max(nk_opt)] + (n - sum(nk_opt))
+
+# Pour obtenir l'estimation optimale, sa variance et l'intervalle de confiance, on aura besoin de:
+# moyennes par strate (muk_opt)
+# variances par strates (sigmak_opt)
+# fréquence de la strate (qk_opt)
+# ATTENTION : sigmak_opt différent de sigmak_hat : ces dernières ont été calculées sur un premier
+# jeu de données independant du jeu de données que nous allons utiliser pour notre estimation.
+# Il va falloir calculer les variances intra strates sur notre nouveau jeu de données : sigmak_opt.
+
+muk_opt <- numeric(K_opt + 1)
+sigmak_opt <- numeric(K_opt + 1)
+qk_opt <- nk_opt / n
+
+# pour S=0, X vaut 0 donc l'indicatrice vaut 1, donc la moyenne de la strate vaut 1 et sa variance 0
+# nous n'aurons aucune observation pour le cas k = 0 (n0 = 0 car la variance est nulle) mais on conserve la strate
+# A MIEUX JUSTIFIER
+
+muk_opt[1] <- 1
+sigmak_opt[1] <- 0
+
+# On calcule les moyennes et variances pour les autres strates (k>=1):
+
+for (k in 1:K_opt) {
+  X <- numeric(nk_opt[k + 1])
+  for (i in 1:nk_opt[k + 1]) {
+    X[i] <- sum(rweibull(k, k_weib, lambda_weib))
+  }
+  Y <- (X < 3)
+  muk_opt[k + 1] <- mean(Y)
+  if (nk_opt[k + 1] == 1) {
+    sigmak_opt[k + 1] <- 0
+  }
+  else {
+    sigmak_opt[k + 1] <- var(Y)
+  }
+}
+
+# Calcul de l'estimateur, de la variance de l'estimateur et de l'intervalle de confiance:
+
+estim_opt <- sum(pk_opt * muk_opt)
+
+# n0 = 0 donc on a un problème lors de la division, mais la variance de la strate k=0 est nulle donc on ne considère que les autres strates
+var_estim_opt <- n * sum(pk_opt[2:K_opt + 1] * pk_opt[2:K_opt + 1] * sigmak_opt[2:K_opt + 1] / nk_opt[2:K_opt + 1])
+test <- sum(pk_opt * sqrt(sigmak_opt)) * sum(pk_opt * sqrt(sigmak_opt))
+# var_estim_opt et test sont sensées être égales mais c'est pas trop le cas
+
+q <- qnorm(0.5 * (1 + level))
+s <- q * sqrt(var_estim_opt) / sqrt(n)
+b.inf_opt <- estim_opt - s
+b.sup_opt <- estim_opt + s
+
+# RESULTATS #
+
+estim_strat_opt <- list(
+  p = estim_opt,
+  var = var_estim_opt,
+  b.inf = b.inf_opt,
+  b.sup = b.sup_opt,
+  level = level
+)
+@
+
+\begin{center}
+  $\heartsuit \heartsuit \heartsuit \heartsuit $
+\end{center}
+
+\end{document}
